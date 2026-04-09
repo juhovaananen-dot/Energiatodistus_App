@@ -74,8 +74,16 @@ ZIP_PATH  = os.path.join(BASE_DIR, 'ethaku.csv.zip')
 if not os.path.exists(CSV_PATH) and os.path.exists(ZIP_PATH):
     print("⏳  Puretaan ethaku.csv.zip...")
     with zipfile.ZipFile(ZIP_PATH, 'r') as zf:
-        zf.extractall(BASE_DIR)
-    print("✅  Purettu.\n")
+        csv_members = [m for m in zf.namelist() if m.lower().endswith('.csv')]
+        print(f"   Zip sisältää: {zf.namelist()}")
+        if csv_members:
+            # Pura CSV suoraan BASE_DIR:iin nimellä ethaku.csv
+            with zf.open(csv_members[0]) as src, open(CSV_PATH, 'wb') as dst:
+                dst.write(src.read())
+            print(f"✅  Purettu ({csv_members[0]} → ethaku.csv)\n")
+        else:
+            print("❌  Zip ei sisällä CSV-tiedostoa!")
+            sys.exit(1)
 
 if not os.path.exists(CSV_PATH):
     print(f"\n❌  Tiedostoa '{CSV_PATH}' ei löydy.")
