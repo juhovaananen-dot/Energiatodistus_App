@@ -66,11 +66,20 @@ init_db()
 # ──────────────────────────────────────────────
 # Datan lataus
 # ──────────────────────────────────────────────
-CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ethaku.csv')
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH  = os.path.join(BASE_DIR, 'ethaku.csv')
+ZIP_PATH  = os.path.join(BASE_DIR, 'ethaku.csv.zip')
+
+# Pura zip automaattisesti jos CSV puuttuu mutta zip löytyy
+if not os.path.exists(CSV_PATH) and os.path.exists(ZIP_PATH):
+    print("⏳  Puretaan ethaku.csv.zip...")
+    with zipfile.ZipFile(ZIP_PATH, 'r') as zf:
+        zf.extractall(BASE_DIR)
+    print("✅  Purettu.\n")
 
 if not os.path.exists(CSV_PATH):
     print(f"\n❌  Tiedostoa '{CSV_PATH}' ei löydy.")
-    print("   Kopioi ethaku.csv samaan kansioon kuin app.py.\n")
+    print("   Kopioi ethaku.csv tai ethaku.csv.zip samaan kansioon kuin app.py.\n")
     sys.exit(1)
 
 print("⏳  Ladataan CSV-data (voi kestää hetken)...")
