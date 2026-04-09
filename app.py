@@ -66,7 +66,7 @@ init_db()
 # ──────────────────────────────────────────────
 # Datan lataus
 # ──────────────────────────────────────────────
-CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ethaku.csv')
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ethaku.csv.zip')
 
 if not os.path.exists(CSV_PATH):
     print(f"\n❌  Tiedostoa '{CSV_PATH}' ei löydy.")
