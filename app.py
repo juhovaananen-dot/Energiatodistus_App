@@ -46,11 +46,16 @@ def init_db():
             ytunnus        TEXT,
             hyvaksytty_at  TEXT DEFAULT (datetime('now','localtime'))
         )''')
-        # Lisää omistaja-sarake vanhoihin kantoihin jos puuttuu
-        try:
-            con.execute('ALTER TABLE yhtiot ADD COLUMN omistaja TEXT')
-        except Exception:
-            pass
+        # Lisää puuttuvat sarakkeet vanhoihin kantoihin
+        for col_def in [
+            'ALTER TABLE yhtiot ADD COLUMN omistaja TEXT',
+            'ALTER TABLE yhtiot ADD COLUMN kontaktoitu_at TEXT',
+            'ALTER TABLE yhtiot ADD COLUMN muistiinpanot TEXT',
+        ]:
+            try:
+                con.execute(col_def)
+            except Exception:
+                pass
         con.commit()
     print("✅  Tietokanta valmis.\n")
 
@@ -271,6 +276,8 @@ def get_energiatodistukset():
     per_page       = request.args.get('per_page', 50, type=int)
     sort_col       = request.args.get('sort', 'eluku')
     sort_dir       = request.args.get('dir', 'asc')
+    omistaja_filter= request.args.get('omistaja', '').strip()
+    kontaktoitu_filter = request.args.get('kontaktoitu', '').strip()  # 'kylla' | 'ei'
 
     if eluokka_filter:
         filtered = filtered[filtered[COL['eluokka']].isin(eluokka_filter)]
@@ -291,6 +298,21 @@ def get_energiatodistukset():
         filtered = filtered[filtered[COL['nettoala']] >= ala_min]
     if ala_max is not None:
         filtered = filtered[filtered[COL['nettoala']] <= ala_max]
+
+    # Omistaja- ja kontaktoitu-suodatus (tietokannasta)
+    if omistaja_filter or kontaktoitu_filter:
+        tallennetut = hae_tallennetut()
+        if omistaja_filter:
+            tunnukset = {k for k, v in tallennetut.items()
+                         if omistaja_filter.lower() in (v.get('omistaja') or '').lower()}
+            filtered = filtered[filtered[COL['rakennustunnus']].isin(tunnukset)]
+        if kontaktoitu_filter == 'kylla':
+            tunnukset = {k for k, v in tallennetut.items() if v.get('kontaktoitu_at')}
+            filtered = filtered[filtered[COL['rakennustunnus']].isin(tunnukset)]
+        elif kontaktoitu_filter == 'ei':
+            tallennetut = hae_tallennetut()
+            tunnukset = {k for k, v in tallennetut.items() if v.get('kontaktoitu_at')}
+            filtered = filtered[~filtered[COL['rakennustunnus']].isin(tunnukset)]
 
     # Lajittelu
     prospektoi = request.args.get('prospektoi', '0') == '1'
@@ -532,6 +554,205 @@ def get_tallennetut():
     return jsonify(list(hae_tallennetut().values()))
 
 
+@app.route('/api/merkitse-kontaktoiduksi', methods=['POST'])
+def merkitse_kontaktoiduksi():
+    data = request.json or {}
+    rakennustunnus = (data.get('rakennustunnus') or '').strip()
+    poista = bool(data.get('poista', False))
+    if not rakennustunnus:
+        return jsonify({'success': False, 'error': 'rakennustunnus puuttuu'})
+    arvo = None if poista else __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_PATH) as con:
+                existing = con.execute(
+                    'SELECT rakennustunnus FROM yhtiot WHERE rakennustunnus=?', (rakennustunnus,)
+                ).fetchone()
+                if existing:
+                    con.execute('UPDATE yhtiot SET kontaktoitu_at=? WHERE rakennustunnus=?',
+                                (arvo, rakennustunnus))
+                else:
+                    con.execute('''INSERT INTO yhtiot (rakennustunnus, yhtio_nimi, kontaktoitu_at)
+                                   VALUES (?, ?, ?)''', (rakennustunnus, '', arvo))
+                con.commit()
+        return jsonify({'success': True, 'kontaktoitu_at': arvo})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/tallenna-muistiinpano', methods=['POST'])
+def tallenna_muistiinpano():
+    data = request.json or {}
+    rakennustunnus = (data.get('rakennustunnus') or '').strip()
+    teksti = (data.get('teksti') or '').strip()
+    if not rakennustunnus:
+        return jsonify({'success': False, 'error': 'rakennustunnus puuttuu'})
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_PATH) as con:
+                existing = con.execute(
+                    'SELECT rakennustunnus FROM yhtiot WHERE rakennustunnus=?', (rakennustunnus,)
+                ).fetchone()
+                if existing:
+                    con.execute('UPDATE yhtiot SET muistiinpanot=? WHERE rakennustunnus=?',
+                                (teksti or None, rakennustunnus))
+                else:
+                    con.execute('''INSERT INTO yhtiot (rakennustunnus, yhtio_nimi, muistiinpanot)
+                                   VALUES (?, ?, ?)''', (rakennustunnus, '', teksti or None))
+                con.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/massahaku', methods=['POST'])
+def massahaku():
+    """Ajaa AI-omistajahaut useille rakennuksille kerralla (max 20)."""
+    data = request.json or {}
+    rakennukset = data.get('rakennukset', [])[:20]
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return jsonify({'success': False, 'error': 'ANTHROPIC_API_KEY puuttuu'})
+    if not rakennukset:
+        return jsonify({'success': False, 'error': 'Ei rakennuksia'})
+
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    tulokset = []
+
+    for rakennus in rakennukset:
+        nimi      = (rakennus.get('nimi') or '').strip()
+        osoite    = (rakennus.get('osoite') or '').strip()
+        postinumero = str(rakennus.get('postinumero') or '').strip()
+        alakaytto = (rakennus.get('alakaytto') or '').strip()
+        valmistumisvuosi = rakennus.get('valmistumisvuosi') or ''
+        nettoala  = rakennus.get('nettoala') or ''
+        rakennustunnus = (rakennus.get('rakennustunnus') or '').strip()
+
+        # Ohita jos omistaja jo tallennettu
+        tallennetut = hae_tallennetut()
+        if rakennustunnus and tallennetut.get(rakennustunnus, {}).get('omistaja'):
+            tulokset.append({'rakennustunnus': rakennustunnus, 'skip': True,
+                             'omistaja': tallennetut[rakennustunnus]['omistaja']})
+            continue
+
+        osoite_full = f'{osoite}, {postinumero}' if postinumero else osoite
+        ala_str = f'{int(nettoala)} m²' if nettoala else 'ei tiedossa'
+
+        prompt = f"""Selvitä suomalaisen kiinteistön omistaja. Palauta VAIN JSON.
+Rakennus: {nimi or 'ei tiedossa'}, {osoite_full}, {alakaytto or ''}, {valmistumisvuosi or ''}, {ala_str}
+MUISTA: omistaja ≠ vuokralainen. Anna LOW confidence jos epävarma.
+{{"owner":{{"name":"","confidence":"HIGH|MEDIUM|LOW"}},"reasoning":""}}"""
+
+        try:
+            msg = client.messages.create(
+                model='claude-haiku-4-5-20251001', max_tokens=256,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            raw = msg.content[0].text.strip()
+            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+            raw = re.sub(r'\s*```\s*$', '', raw, flags=re.MULTILINE)
+            result = json.loads(raw)
+            owner_name = result.get('owner', {}).get('name', '')
+            confidence = result.get('owner', {}).get('confidence', 'LOW')
+
+            # Tallenna automaattisesti jos HIGH tai MEDIUM
+            if owner_name and confidence in ('HIGH', 'MEDIUM') and rakennustunnus:
+                with db_lock:
+                    with sqlite3.connect(DB_PATH) as con:
+                        existing = con.execute(
+                            'SELECT yhtio_nimi FROM yhtiot WHERE rakennustunnus=?',
+                            (rakennustunnus,)).fetchone()
+                        if existing:
+                            con.execute('UPDATE yhtiot SET omistaja=? WHERE rakennustunnus=?',
+                                        (owner_name, rakennustunnus))
+                        else:
+                            con.execute('''INSERT INTO yhtiot (rakennustunnus, osoite, yhtio_nimi, omistaja)
+                                           VALUES (?,?,?,?)''',
+                                        (rakennustunnus, osoite, nimi, owner_name))
+                        con.commit()
+
+            tulokset.append({
+                'rakennustunnus': rakennustunnus, 'nimi': nimi, 'osoite': osoite,
+                'omistaja': owner_name, 'confidence': confidence,
+                'reasoning': result.get('reasoning', ''), 'tallennettu': confidence in ('HIGH', 'MEDIUM')
+            })
+        except Exception as e:
+            tulokset.append({'rakennustunnus': rakennustunnus, 'nimi': nimi,
+                             'osoite': osoite, 'virhe': str(e)})
+
+    return jsonify({'success': True, 'tulokset': tulokset})
+
+
+@app.route('/api/vie-excel')
+def vie_excel():
+    """Vie tallennetut omistajat + rakennustiedot Excel-tiedostona."""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from flask import Response
+
+        tallennetut = hae_tallennetut()
+        if not tallennetut:
+            return jsonify({'error': 'Ei tallennettuja tietoja'}), 404
+
+        tunnukset = set(tallennetut.keys())
+        rak_col = COL.get('rakennustunnus', '')
+        if rak_col:
+            mask = df[rak_col].isin(tunnukset)
+            subset = df[mask].copy()
+        else:
+            subset = pd.DataFrame()
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Omistajat'
+
+        headers = ['Rakennustunnus', 'Nimi', 'Osoite', 'Postinumero',
+                   'E-luokka', 'E-luku', 'Pinta-ala (m²)', 'Valmistumisvuosi',
+                   'Käyttötarkoitus', 'Omistaja', 'Yhtiönimi', 'Kontaktoitu', 'Muistiinpanot']
+        header_fill = PatternFill('solid', fgColor='1e3a5f')
+        header_font = Font(bold=True, color='FFFFFF')
+
+        for ci, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=ci, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center')
+
+        col_keys = ['rakennustunnus', 'nimi', 'osoite', 'postinumero',
+                    'eluokka', 'eluku', 'nettoala', 'valmistumisvuosi', 'alakaytto']
+
+        for ri, (_, row) in enumerate(subset.iterrows(), 2):
+            tunnus = str(row.get(COL.get('rakennustunnus', ''), '') or '')
+            t = tallennetut.get(tunnus, {})
+            for ci, key in enumerate(col_keys, 1):
+                v = row.get(COL.get(key, ''), '')
+                ws.cell(row=ri, column=ci, value=None if pd.isna(v) else v)
+            ws.cell(row=ri, column=10, value=t.get('omistaja', ''))
+            ws.cell(row=ri, column=11, value=t.get('yhtio_nimi', ''))
+            ws.cell(row=ri, column=12, value=t.get('kontaktoitu_at', ''))
+            ws.cell(row=ri, column=13, value=t.get('muistiinpanot', ''))
+
+        # Sarakeleveydet
+        for col in ws.columns:
+            max_len = max((len(str(c.value or '')) for c in col), default=10)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return Response(
+            buf.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': 'attachment; filename=omistajat.xlsx'}
+        )
+    except ImportError:
+        return jsonify({'error': 'openpyxl puuttuu — lisää requirements.txt:ään'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ──────────────────────────────────────────────
 # Frontend (HTML)
 # ──────────────────────────────────────────────
@@ -645,6 +866,24 @@ HTML = r"""<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- Omistaja-haku -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Omistaja</label>
+        <input id="omistaja-filter" type="text" placeholder="Hae omistajalla..."
+          class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-violet-400 focus:outline-none">
+      </div>
+
+      <!-- Kontaktoitu -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Kontaktoitu</label>
+        <select id="kontaktoitu-filter"
+          class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <option value="">Kaikki</option>
+          <option value="ei">Ei kontaktoitu</option>
+          <option value="kylla">Kontaktoitu</option>
+        </select>
+      </div>
+
     </div>
     <div class="p-4 border-t border-slate-100">
       <button onclick="applyFilters()" class="w-full bg-blue-600 text-white font-medium text-sm py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
@@ -667,6 +906,21 @@ HTML = r"""<!DOCTYPE html>
         </svg>
         Prospektoi
       </button>
+      <button onclick="kaynnistaMassahaku()"
+        class="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+        </svg>
+        Massahaku
+      </button>
+      <a href="/api/vie-excel" download="omistajat.xlsx"
+        class="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Vie Excel
+      </a>
+      <div id="massahaku-status" class="hidden text-xs text-violet-600 bg-violet-50 px-2 py-1 rounded-lg"></div>
       <div class="ml-auto flex items-center gap-3">
         <select id="sort-select" onchange="handleSortSelect()" class="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600">
           <option value="eluku|desc">E-luku ↓ ensin</option>
@@ -798,6 +1052,31 @@ HTML = r"""<!DOCTYPE html>
 
         <div id="omistaja-error" class="hidden text-xs text-amber-700 bg-amber-50 rounded-lg p-2 mt-2"></div>
       </div>
+
+      <!-- Kontaktoitu -->
+      <div class="border border-slate-100 rounded-xl p-4 bg-slate-50/40">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="font-semibold text-slate-700 text-sm">Kontaktoitu</div>
+            <div id="kontaktoitu-pvm" class="text-xs text-slate-400 mt-0.5"></div>
+          </div>
+          <button id="kontaktoitu-btn" onclick="toggleKontaktoitu()"
+            class="text-sm font-medium px-4 py-2 rounded-lg border transition-colors">
+          </button>
+        </div>
+      </div>
+
+      <!-- Muistiinpanot -->
+      <div class="border border-slate-100 rounded-xl p-4 bg-slate-50/40">
+        <div class="font-semibold text-slate-700 text-sm mb-2">Muistiinpanot</div>
+        <textarea id="muistiinpanot-input" rows="3" placeholder="Lisää muistiinpanoja..."
+          class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-slate-400 focus:outline-none bg-white resize-none"></textarea>
+        <button onclick="tallennaMuistiinpano()"
+          class="mt-2 text-xs bg-slate-700 text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors">
+          Tallenna muistiinpano
+        </button>
+      </div>
+
     </div>
   </div>
 </div>
@@ -1012,6 +1291,11 @@ async function fetchData() {
   if (alaMin) params.set('ala_min', alaMin);
   if (alaMax) params.set('ala_max', alaMax);
 
+  const omistajaf = document.getElementById('omistaja-filter').value.trim();
+  if (omistajaf) params.set('omistaja', omistajaf);
+  const kontaktoiduf = document.getElementById('kontaktoitu-filter').value;
+  if (kontaktoiduf) params.set('kontaktoitu', kontaktoiduf);
+
   document.getElementById('loading').classList.remove('hidden');
   document.getElementById('table-body').innerHTML = '';
   document.getElementById('empty-state').classList.add('hidden');
@@ -1050,11 +1334,13 @@ function renderTable(rows) {
     const omistaja    = tallennettu?.omistaja || '';
     const el          = row.eluokka || '?';
 
+    const kontaktoitu = tallennettu?.kontaktoitu_at || '';
     const chips = [];
     if (row.nettoala)         chips.push(`<span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">${Math.round(row.nettoala).toLocaleString('fi')} m²</span>`);
     if (row.valmistumisvuosi) chips.push(`<span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">${row.valmistumisvuosi}</span>`);
     if (row.lammitys)         chips.push(`<span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">${row.lammitys}</span>`);
     if (omistaja)             chips.push(`<span class="omistaja-chip text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">${omistaja}</span>`);
+    if (kontaktoitu)          chips.push(`<span class="kontaktoitu-chip text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">✓ Kontaktoitu</span>`);
 
     const card = document.createElement('div');
     card.className = `bg-white rounded-xl shadow-sm border-l-4 border-eluokka-${el} flex items-stretch cursor-pointer hover:shadow-md transition-all group`;
@@ -1190,7 +1476,129 @@ function openModal(row, tr) {
   // Täytä manuaalikenttä tallennetulla omistajalla jos on
   document.getElementById('omistaja-manuaali').value = savedOmistaja;
 
+  // Kontaktoitu-nappi
+  const kontaktoituAt = tallennettu?.kontaktoitu_at || '';
+  const kBtn = document.getElementById('kontaktoitu-btn');
+  const kPvm = document.getElementById('kontaktoitu-pvm');
+  if (kontaktoituAt) {
+    kBtn.textContent = 'Merkitse ei-kontaktoiduksi';
+    kBtn.className = 'text-sm font-medium px-4 py-2 rounded-lg border transition-colors bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100';
+    kPvm.textContent = 'Kontaktoitu: ' + kontaktoituAt;
+  } else {
+    kBtn.textContent = 'Merkitse kontaktoiduksi';
+    kBtn.className = 'text-sm font-medium px-4 py-2 rounded-lg border transition-colors bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+    kPvm.textContent = '';
+  }
+
+  // Muistiinpanot
+  document.getElementById('muistiinpanot-input').value = tallennettu?.muistiinpanot || '';
+
   document.getElementById('modal').classList.add('open');
+}
+
+async function toggleKontaktoitu() {
+  if (!currentRow) return;
+  const rakennustunnus = currentRow.rakennustunnus;
+  const tallennettu = state.tallennetut[rakennustunnus];
+  const onKontaktoitu = !!(tallennettu?.kontaktoitu_at);
+
+  const res = await fetch('/api/merkitse-kontaktoiduksi', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rakennustunnus, poista: onKontaktoitu}),
+  });
+  const data = await res.json();
+  if (data.success) {
+    if (!state.tallennetut[rakennustunnus]) state.tallennetut[rakennustunnus] = {rakennustunnus};
+    state.tallennetut[rakennustunnus].kontaktoitu_at = data.kontaktoitu_at || '';
+    // Päivitä nappi
+    const kBtn = document.getElementById('kontaktoitu-btn');
+    const kPvm = document.getElementById('kontaktoitu-pvm');
+    if (data.kontaktoitu_at) {
+      kBtn.textContent = 'Merkitse ei-kontaktoiduksi';
+      kBtn.className = 'text-sm font-medium px-4 py-2 rounded-lg border transition-colors bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100';
+      kPvm.textContent = 'Kontaktoitu: ' + data.kontaktoitu_at;
+    } else {
+      kBtn.textContent = 'Merkitse kontaktoiduksi';
+      kBtn.className = 'text-sm font-medium px-4 py-2 rounded-lg border transition-colors bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+      kPvm.textContent = '';
+    }
+    // Päivitä kortti
+    const card = document.querySelector(`[data-tunnus="${rakennustunnus}"]`);
+    if (card) {
+      const chipsDiv = card.querySelector('.flex.gap-1\\.5');
+      const existingChip = chipsDiv?.querySelector('.kontaktoitu-chip');
+      if (data.kontaktoitu_at && chipsDiv && !existingChip) {
+        const chip = document.createElement('span');
+        chip.className = 'kontaktoitu-chip text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium';
+        chip.textContent = '✓ Kontaktoitu';
+        chipsDiv.appendChild(chip);
+      } else if (!data.kontaktoitu_at && existingChip) {
+        existingChip.remove();
+      }
+    }
+  }
+}
+
+async function tallennaMuistiinpano() {
+  if (!currentRow) return;
+  const teksti = document.getElementById('muistiinpanot-input').value.trim();
+  const rakennustunnus = currentRow.rakennustunnus;
+  const res = await fetch('/api/tallenna-muistiinpano', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rakennustunnus, teksti}),
+  });
+  const data = await res.json();
+  if (data.success) {
+    if (!state.tallennetut[rakennustunnus]) state.tallennetut[rakennustunnus] = {rakennustunnus};
+    state.tallennetut[rakennustunnus].muistiinpanot = teksti;
+    const btn = document.querySelector('button[onclick="tallennaMuistiinpano()"]');
+    if (btn) { btn.textContent = '✓ Tallennettu'; setTimeout(() => btn.textContent = 'Tallenna muistiinpano', 1500); }
+  }
+}
+
+async function kaynnistaMassahaku() {
+  const statusEl = document.getElementById('massahaku-status');
+  statusEl.textContent = 'Haetaan näkyvät rakennukset...';
+  statusEl.classList.remove('hidden');
+
+  // Kerää nykyiset kortit
+  const cards = document.querySelectorAll('#table-body [data-tunnus]');
+  const rakennukset = [];
+  cards.forEach(card => {
+    if (card._rowData) rakennukset.push(card._rowData);
+  });
+
+  if (!rakennukset.length) {
+    statusEl.textContent = 'Ei rakennuksia — hae ensin tuloksia';
+    return;
+  }
+
+  const erä = rakennukset.slice(0, 20);
+  statusEl.textContent = `AI hakee omistajia ${erä.length} rakennukselle...`;
+
+  const res = await fetch('/api/massahaku', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rakennukset: erä}),
+  });
+  const data = await res.json();
+  if (!data.success) { statusEl.textContent = '⚠️ ' + data.error; return; }
+
+  let tallennettu = 0, ohitettu = 0;
+  data.tulokset.forEach(t => {
+    if (t.skip) { ohitettu++; return; }
+    if (t.tallennettu && t.omistaja) {
+      tallennettu++;
+      if (!state.tallennetut[t.rakennustunnus]) state.tallennetut[t.rakennustunnus] = {rakennustunnus: t.rakennustunnus};
+      state.tallennetut[t.rakennustunnus].omistaja = t.omistaja;
+      paivitaOmistajaChip(t.rakennustunnus, t.omistaja);
+    }
+  });
+
+  statusEl.textContent = `✓ Valmis — ${tallennettu} omistajaa tallennettu, ${ohitettu} ohitettu (jo tallennettu)`;
+  setTimeout(() => statusEl.classList.add('hidden'), 5000);
 }
 
 function closeModal() {
