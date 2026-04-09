@@ -421,66 +421,84 @@ def omistaja_ai():
         osoite_full = f'{osoite}, {postinumero}' if postinumero else osoite
         ala_str     = f'{int(nettoala)} m²' if nettoala else 'ei tiedossa'
 
-        prompt = f"""Olet asiantuntijajärjestelmä, joka selvittää suomalaisten kiinteistöjen omistustietoja.
-Tehtäväsi on selvittää KIINTEISTÖN OMISTAJA — ei vuokralaista tai toiminnanharjoittajaa.
+        prompt = f"""You are an expert system for identifying ownership and key contacts for Finnish commercial real estate.
 
-KRIITTINEN EROTTELU:
-- OMISTAJA = taho joka OMISTAA rakennuksen tai maan (kiinteistöyhtiö, eläkerahasto, sijoittaja)
-- VUOKRALAINEN / TOIMINNANHARJOITTAJA = yritys joka TOIMII rakennuksessa (kauppa, toimisto, tehdas)
-- Nämä ovat eri asioita! Esimerkki: Citycon omistaa kauppakeskuksen, S-ryhmä/Prisma on vuokralainen.
+INPUT:
+- Building name: {nimi or 'unknown'}
+- Address: {osoite_full}
+- Building type: {alakaytto or 'unknown'}
+- Built: {valmistumisvuosi or 'unknown'}
+- Floor area: {ala_str}
 
-LÄHTÖTIEDOT:
-- Rakennuksen nimi: {nimi or 'ei tiedossa'}
-- Osoite: {osoite_full}
-- Rakennustyyppi: {alakaytto or 'ei tiedossa'}
-- Valmistumisvuosi: {valmistumisvuosi or 'ei tiedossa'}
-- Pinta-ala: {ala_str}
+GOAL: Determine:
+1. Property identity
+2. Ownership structure
+3. Best matching property contact (property manager / leasing contact)
 
-SUOMALAINEN KIINTEISTÖOMISTUKSEN KONTEKSTI:
-- Vähittäiskaupan kiinteistöt: usein Citycon, Regency Centers, eläkerahastot tai Kiinteistö Oy -yhtiöt
-- S-ryhmä (Prisma, S-market, Sale) omistaa osan kiinteistöistään itse SOK:n tai alueosuuskauppojen kautta
-- K-ryhmä (K-citymarket, K-market) omistaa osan kiinteistöistään Keskon tai Kiinteistö Keskon kautta
-- Toimistorakennukset: usein eläkerahastot (Ilmarinen, Varma, Keva, Elo, Veritas)
-- Teollisuus/logistiikka: usein Logicor, Prologis, Nyfosa tai kotimaiset kiinteistörahastot
-- Asuinrakennukset: SATO, Kojamo (Lumo), kunta tai yksityinen Asunto Oy
+STEP 0 — KNOWN PROPERTY RECOGNITION (CRITICAL)
+- Check if the property is a well-known asset
+- If matched, use known owner as primary signal
 
-PÄÄTTELYSTRATEGIA:
-1. Tunnista rakennuksen tyyppi ja todennäköinen käyttötarkoitus nimen perusteella
-2. Jos nimi viittaa brändiin (Prisma, Lidl, K-citymarket), mieti omistaako brändi itse vai vuokraako
-3. Etsi kiinteistöön liittyvä Kiinteistö Oy tai isännöitsijä
-4. Harkitse institutionaalisia omistajia (eläkerahastot, kiinteistörahastot)
-5. Jos et tiedä varmasti, anna LOW confidence ja selitä epävarmuus
+STEP 1 — IDENTIFY PROPERTY
+- Resolve address → property/building name
 
-LUOTTAMUSTASOT:
-- HIGH: Suora vahvistus luotettavasta lähteestä
-- MEDIUM: Vahva epäsuora näyttö (useita yhteneviä vihjeitä)
-- LOW: Heikko tai yksittäinen päättely — käytä tätä aina kun epävarma
+STEP 2 — FIND OPERATORS
+- Identify: asset manager, leasing agent, property manager
+- These are the PRIMARY sources for contact persons
 
-SÄÄNNÖT:
-- ÄLÄ keksi omistajan nimeä ilman näyttöä
-- ÄLÄ sekoita vuokralaista omistajaksi
-- Jos epävarma, kerro se selkeästi ja anna LOW confidence
-- Perustelu suomeksi
+STEP 3 — CONTACT DISCOVERY (HIGH PRIORITY)
+Find the best available contact person related to the property.
+Search sources in this order:
+1. Leasing listings (toimitilat.fi, oikotie, company sites)
+2. Asset manager website (e.g. JLL, Newsec, Juhola)
+3. Property manager listings
+4. Company portfolio pages
+Select the BEST MATCH based on:
+- Direct mention of the property (highest priority)
+- Same building or exact address
+- Same owner portfolio
+Return: name, role, company, email (if available), phone (if available)
+If multiple contacts exist, choose the most relevant (closest to leasing or property responsibility)
 
-Palauta VAIN kelvollinen JSON, ei markdownia:
+STEP 4 — OWNER IDENTIFICATION
+Priority: 1. Known asset-owner match  2. Direct ownership info  3. Inference via operator
+
+STEP 5 — CONFIDENCE
+- HIGH: direct + named property + contact match
+- MEDIUM: indirect but consistent signals
+- LOW: weak signals
+
+RULES:
+- Prefer a real usable contact over perfect ownership certainty
+- DO NOT hallucinate emails or phone numbers — leave empty if not known
+- If exact person not found, return closest valid contact
+- Reasoning must be in Finnish
+
+Return ONLY valid JSON, no markdown:
 {{
+  "address": "{osoite_full}",
   "property_name": "",
+  "recognized_asset": false,
   "owner": {{
     "name": "",
-    "type": "company | pension_fund | real_estate_fund | cooperative | municipality | unknown",
     "confidence": "HIGH | MEDIUM | LOW"
   }},
   "asset_manager": "",
-  "property_manager": "",
-  "evidence": [
-    {{"type": "fact | inference", "description": ""}}
-  ],
+  "contact": {{
+    "name": "",
+    "role": "",
+    "company": "",
+    "email": "",
+    "phone": "",
+    "match_quality": "DIRECT | CLOSE | PORTFOLIO"
+  }},
+  "evidence": [],
   "reasoning": ""
 }}"""
 
         message = client.messages.create(
             model='claude-haiku-4-5-20251001',
-            max_tokens=1024,
+            max_tokens=1500,
             messages=[{'role': 'user', 'content': prompt}]
         )
 
@@ -1815,50 +1833,59 @@ async function haeOmistajaAI() {
     }
 
     const r = data.result;
-    const owner = r.owner || {};
+    const owner   = r.owner   || {};
+    const contact = r.contact || {};
     const confColor = owner.confidence === 'HIGH' ? 'emerald' : owner.confidence === 'MEDIUM' ? 'amber' : 'orange';
     const confLabel = owner.confidence === 'HIGH' ? 'Varma' : owner.confidence === 'MEDIUM' ? 'Todennäköinen' : 'Epävarma';
-    const typeLabel = {'company':'Yhtiö','pension_fund':'Eläkerahasto','real_estate_fund':'Kiinteistörahasto','unknown':'Tuntematon'}[owner.type] || owner.type;
+    const mqColor = contact.match_quality === 'DIRECT' ? 'emerald' : contact.match_quality === 'CLOSE' ? 'amber' : 'slate';
+    const mqLabel = contact.match_quality === 'DIRECT' ? 'Suora' : contact.match_quality === 'CLOSE' ? 'Läheinen' : 'Portfolio';
 
     const evidenceHtml = (r.evidence || []).map(e => `
       <li class="flex gap-1.5">
-        <span class="text-xs mt-0.5 ${e.type === 'fact' ? 'text-emerald-500' : 'text-amber-500'}">${e.type === 'fact' ? '✓' : '~'}</span>
-        <span class="text-xs text-slate-600">${e.description}</span>
+        <span class="text-xs mt-0.5 text-slate-400">·</span>
+        <span class="text-xs text-slate-600">${typeof e === 'string' ? e : e.description || ''}</span>
       </li>`).join('');
+
+    const contactHtml = contact.name ? `
+      <div class="border border-slate-100 rounded-lg p-3 space-y-1 bg-slate-50">
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Yhteyshenkilö</div>
+          ${contact.match_quality ? `<span class="text-xs bg-${mqColor}-100 text-${mqColor}-700 px-2 py-0.5 rounded-full">${mqLabel}</span>` : ''}
+        </div>
+        <div class="font-semibold text-slate-800 text-sm">${contact.name}</div>
+        ${contact.role    ? `<div class="text-xs text-slate-500">${contact.role}${contact.company ? ' · ' + contact.company : ''}</div>` : ''}
+        ${contact.email   ? `<div class="text-xs text-blue-600 mt-1"><a href="mailto:${contact.email}">${contact.email}</a></div>` : ''}
+        ${contact.phone   ? `<div class="text-xs text-slate-600">${contact.phone}</div>` : ''}
+      </div>` : '';
 
     resultEl.innerHTML = `
       <div class="bg-white border border-violet-100 rounded-xl p-4 space-y-3">
 
         <!-- Omistaja -->
         <div class="flex items-start justify-between gap-3">
-          <div>
+          <div class="min-w-0">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Omistaja</div>
             <div class="font-bold text-slate-800 text-base">${owner.name || '—'}</div>
-            <div class="text-xs text-slate-500 mt-0.5">${typeLabel}</div>
+            ${r.asset_manager ? `<div class="text-xs text-slate-500 mt-0.5">Asset manager: ${r.asset_manager}</div>` : ''}
+            ${r.recognized_asset ? `<div class="text-xs text-violet-600 mt-0.5">✓ Tunnistettu kiinteistö</div>` : ''}
           </div>
           <div class="flex flex-col items-end gap-2 flex-shrink-0">
             <span class="text-xs font-semibold bg-${confColor}-100 text-${confColor}-700 px-2 py-0.5 rounded-full">${confLabel}</span>
             ${owner.name ? `<button onclick="tallennaOmistaja('${owner.name.replace(/'/g,"\\'")}')"
               class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 font-medium whitespace-nowrap">
-              Tallenna
+              Tallenna omistaja
             </button>` : ''}
           </div>
         </div>
 
-        <!-- Isännöitsijä / assetmanager -->
-        ${r.property_manager || r.asset_manager ? `
-        <div class="flex gap-4 text-xs text-slate-600 border-t border-slate-100 pt-3">
-          ${r.property_manager ? `<div><span class="text-slate-400">Isännöitsijä:</span> ${r.property_manager}</div>` : ''}
-          ${r.asset_manager ? `<div><span class="text-slate-400">Asset manager:</span> ${r.asset_manager}</div>` : ''}
-        </div>` : ''}
+        <!-- Yhteyshenkilö -->
+        ${contactHtml}
 
         <!-- Evidence -->
-        ${evidenceHtml ? `
-        <ul class="space-y-1 border-t border-slate-100 pt-3">${evidenceHtml}</ul>` : ''}
+        ${evidenceHtml ? `<ul class="space-y-1 border-t border-slate-100 pt-2">${evidenceHtml}</ul>` : ''}
 
         <!-- Perustelu -->
-        ${r.reasoning ? `
-        <div class="text-xs text-slate-500 italic border-t border-slate-100 pt-3">${r.reasoning}</div>` : ''}
+        ${r.reasoning ? `<div class="text-xs text-slate-500 italic border-t border-slate-100 pt-2">${r.reasoning}</div>` : ''}
       </div>`;
     resultEl.classList.remove('hidden');
 
