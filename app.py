@@ -71,7 +71,7 @@ CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ethaku.csv.
 if not os.path.exists(CSV_PATH):
     print(f"\n❌  Tiedostoa '{CSV_PATH}' ei löydy.")
     print("   Kopioi ethaku.csv samaan kansioon kuin app.py.\n")
-    sys.exit(1)
+    #sys.exit(1)
 
 print("⏳  Ladataan CSV-data (voi kestää hetken)...")
 df = pd.read_csv(CSV_PATH, sep=';', low_memory=False)
