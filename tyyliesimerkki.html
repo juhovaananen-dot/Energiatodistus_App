@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<title>Tyylivaihtoehdot</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; background: #f1f5f9; }
+  .eluokka-G { background:#7f1d1d; color:#fff; }
+  .eluokka-F { background:#dc2626; color:#fff; }
+  .eluokka-E { background:#ea580c; color:#fff; }
+  .border-G { border-left-color: #7f1d1d; }
+  .border-F { border-left-color: #dc2626; }
+  .border-E { border-left-color: #ea580c; }
+  .bg-G { background:#7f1d1d; }
+  .bg-F { background:#dc2626; }
+  .bg-E { background:#ea580c; }
+</style>
+</head>
+<body class="p-8 space-y-12">
+
+<h1 class="text-2xl font-bold text-slate-800">Tyylivaihtoehdot</h1>
+
+<!-- ══════════════════════════════════════
+     VAIHTOEHTO A — KORTTILISTAUS
+     ══════════════════════════════════════ -->
+<section>
+  <h2 class="text-lg font-semibold text-slate-600 mb-3 flex items-center gap-2">
+    <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded">A</span>
+    Korttilistaus
+    <span class="text-sm font-normal text-slate-400">— tiivis, nopea skannata</span>
+  </h2>
+  <div class="space-y-2 max-w-2xl">
+
+    <!-- Kortti 1 -->
+    <div class="bg-white rounded-xl shadow-sm border-l-4 border-G flex items-stretch cursor-pointer hover:shadow-md transition-shadow">
+      <div class="bg-G w-12 flex-shrink-0 rounded-l-xl flex items-center justify-center">
+        <span class="text-white font-black text-lg">G</span>
+      </div>
+      <div class="flex-1 px-4 py-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="font-semibold text-slate-800 text-sm">Asunto Oy Hansakortteli</div>
+            <div class="text-xs text-slate-500 mt-0.5">Yliopistonkatu 24 · Turku</div>
+          </div>
+          <div class="text-right flex-shrink-0">
+            <div class="text-sm font-mono font-bold text-red-700">340 kWh</div>
+            <div class="text-xs text-slate-400">kWh/(m²a)</div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-2 flex-wrap">
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">1 200 m²</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">2003</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Kaukolämpö</span>
+          <span class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">Citycon Oyj</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kortti 2 -->
+    <div class="bg-white rounded-xl shadow-sm border-l-4 border-F flex items-stretch cursor-pointer hover:shadow-md transition-shadow">
+      <div class="bg-F w-12 flex-shrink-0 rounded-l-xl flex items-center justify-center">
+        <span class="text-white font-black text-lg">F</span>
+      </div>
+      <div class="flex-1 px-4 py-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="font-semibold text-slate-800 text-sm">KOY Sokos Hotel Turku</div>
+            <div class="text-xs text-slate-500 mt-0.5">Humalistonkatu 2 · Turku</div>
+          </div>
+          <div class="text-right flex-shrink-0">
+            <div class="text-sm font-mono font-bold text-orange-600">280 kWh</div>
+            <div class="text-xs text-slate-400">kWh/(m²a)</div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-2 flex-wrap">
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">4 500 m²</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">1998</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Öljy</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kortti 3 -->
+    <div class="bg-white rounded-xl shadow-sm border-l-4 border-E flex items-stretch cursor-pointer hover:shadow-md transition-shadow">
+      <div class="bg-E w-12 flex-shrink-0 rounded-l-xl flex items-center justify-center">
+        <span class="text-white font-black text-lg">E</span>
+      </div>
+      <div class="flex-1 px-4 py-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="font-semibold text-slate-800 text-sm">Kiinteistö Oy Kaivokatu 12</div>
+            <div class="text-xs text-slate-500 mt-0.5">Kaivokatu 12 · Helsinki</div>
+          </div>
+          <div class="text-right flex-shrink-0">
+            <div class="text-sm font-mono font-bold text-orange-500">215 kWh</div>
+            <div class="text-xs text-slate-400">kWh/(m²a)</div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-2 flex-wrap">
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">890 m²</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">1987</span>
+          <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Sähkö</span>
+          <span class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">Kojamo Oyj</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     VAIHTOEHTO B — KORTTIRUUDUKKO
+     ══════════════════════════════════════ -->
+<section>
+  <h2 class="text-lg font-semibold text-slate-600 mb-3 flex items-center gap-2">
+    <span class="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-0.5 rounded">B</span>
+    Korttiruudukko
+    <span class="text-sm font-normal text-slate-400">— visuaalinen, hyvä silmäillä</span>
+  </h2>
+  <div class="grid grid-cols-3 gap-3 max-w-2xl">
+
+    <div class="bg-white rounded-2xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow">
+      <div class="flex items-center justify-between mb-3">
+        <span class="bg-G text-white text-xl font-black w-10 h-10 rounded-xl flex items-center justify-center">G</span>
+        <span class="text-xs text-slate-400">2003</span>
+      </div>
+      <div class="font-semibold text-slate-800 text-sm leading-tight mb-1">Asunto Oy Hansakortteli</div>
+      <div class="text-xs text-slate-500 mb-3">Turku</div>
+      <div class="border-t border-slate-100 pt-2 space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">E-luku</span>
+          <span class="font-mono font-bold text-red-700">340</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Ala</span>
+          <span class="font-mono text-slate-600">1 200 m²</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Omistaja</span>
+          <span class="text-violet-600 font-medium truncate ml-2">Citycon</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow">
+      <div class="flex items-center justify-between mb-3">
+        <span class="bg-F text-white text-xl font-black w-10 h-10 rounded-xl flex items-center justify-center">F</span>
+        <span class="text-xs text-slate-400">1998</span>
+      </div>
+      <div class="font-semibold text-slate-800 text-sm leading-tight mb-1">KOY Sokos Hotel Turku</div>
+      <div class="text-xs text-slate-500 mb-3">Turku</div>
+      <div class="border-t border-slate-100 pt-2 space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">E-luku</span>
+          <span class="font-mono font-bold text-orange-600">280</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Ala</span>
+          <span class="font-mono text-slate-600">4 500 m²</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Omistaja</span>
+          <span class="text-slate-300">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow">
+      <div class="flex items-center justify-between mb-3">
+        <span class="bg-E text-white text-xl font-black w-10 h-10 rounded-xl flex items-center justify-center">E</span>
+        <span class="text-xs text-slate-400">1987</span>
+      </div>
+      <div class="font-semibold text-slate-800 text-sm leading-tight mb-1">Kiinteistö Oy Kaivokatu 12</div>
+      <div class="text-xs text-slate-500 mb-3">Helsinki</div>
+      <div class="border-t border-slate-100 pt-2 space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">E-luku</span>
+          <span class="font-mono font-bold text-orange-500">215</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Ala</span>
+          <span class="font-mono text-slate-600">890 m²</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-slate-400">Omistaja</span>
+          <span class="text-violet-600 font-medium truncate ml-2">Kojamo</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     VAIHTOEHTO C — PARANNETTU LISTA
+     ══════════════════════════════════════ -->
+<section>
+  <h2 class="text-lg font-semibold text-slate-600 mb-3 flex items-center gap-2">
+    <span class="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded">C</span>
+    Parannettu lista
+    <span class="text-sm font-normal text-slate-400">— nopein 144k rivin selaukseen</span>
+  </h2>
+  <div class="bg-white rounded-2xl shadow-sm overflow-hidden max-w-2xl divide-y divide-slate-50">
+
+    <div class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 cursor-pointer transition-colors">
+      <span class="bg-G text-white text-sm font-black w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center">G</span>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-slate-800 text-sm truncate">Asunto Oy Hansakortteli</div>
+        <div class="text-xs text-slate-400 truncate">Yliopistonkatu 24 · Turku · <span class="text-violet-500 font-medium">Citycon Oyj</span></div>
+      </div>
+      <div class="flex-shrink-0 text-right">
+        <div class="text-sm font-mono font-bold text-red-700">340 kWh</div>
+        <div class="text-xs text-slate-400">1 200 m² · 2003</div>
+      </div>
+      <svg class="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </div>
+
+    <div class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 cursor-pointer transition-colors">
+      <span class="bg-F text-white text-sm font-black w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center">F</span>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-slate-800 text-sm truncate">KOY Sokos Hotel Turku</div>
+        <div class="text-xs text-slate-400 truncate">Humalistonkatu 2 · Turku</div>
+      </div>
+      <div class="flex-shrink-0 text-right">
+        <div class="text-sm font-mono font-bold text-orange-600">280 kWh</div>
+        <div class="text-xs text-slate-400">4 500 m² · 1998</div>
+      </div>
+      <svg class="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </div>
+
+    <div class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 cursor-pointer transition-colors">
+      <span class="bg-E text-white text-sm font-black w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center">E</span>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-slate-800 text-sm truncate">Kiinteistö Oy Kaivokatu 12</div>
+        <div class="text-xs text-slate-400 truncate">Kaivokatu 12 · Helsinki · <span class="text-violet-500 font-medium">Kojamo Oyj</span></div>
+      </div>
+      <div class="flex-shrink-0 text-right">
+        <div class="text-sm font-mono font-bold text-orange-500">215 kWh</div>
+        <div class="text-xs text-slate-400">890 m² · 1987</div>
+      </div>
+      <svg class="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </div>
+
+  </div>
+</section>
+
+<p class="text-sm text-slate-400 pt-4">Kerro kumpi tyyli sopii → toteutetaan app.py:hyn.</p>
+
+</body>
+</html>
