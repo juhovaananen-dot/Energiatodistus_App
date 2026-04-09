@@ -75,14 +75,17 @@ BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH  = os.path.join(BASE_DIR, 'ethaku.csv')
 ZIP_PATH  = os.path.join(BASE_DIR, 'ethaku.csv.zip')
 
-# Pura zip automaattisesti jos CSV puuttuu mutta zip löytyy
-if not os.path.exists(CSV_PATH) and os.path.exists(ZIP_PATH):
+# Pura zip jos CSV puuttuu TAI zip on uudempi kuin nykyinen CSV
+def _zip_on_uudempi():
+    if not os.path.exists(CSV_PATH): return True
+    if not os.path.exists(ZIP_PATH): return False
+    return os.path.getmtime(ZIP_PATH) > os.path.getmtime(CSV_PATH)
+
+if os.path.exists(ZIP_PATH) and _zip_on_uudempi():
     print("⏳  Puretaan ethaku.csv.zip...")
     with zipfile.ZipFile(ZIP_PATH, 'r') as zf:
         csv_members = [m for m in zf.namelist() if m.lower().endswith('.csv')]
-        print(f"   Zip sisältää: {zf.namelist()}")
         if csv_members:
-            # Pura CSV suoraan BASE_DIR:iin nimellä ethaku.csv
             with zf.open(csv_members[0]) as src, open(CSV_PATH, 'wb') as dst:
                 dst.write(src.read())
             print(f"✅  Purettu ({csv_members[0]} → ethaku.csv)\n")
