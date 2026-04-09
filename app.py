@@ -314,89 +314,6 @@ def get_energiatodistukset():
     return jsonify({'total': total, 'page': page, 'per_page': per_page, 'data': records})
 
 
-@app.route('/api/google-haku', methods=['POST'])
-def google_haku():
-    """Hakee rakennuksen omistajan DuckDuckGo-haulla."""
-    data     = request.json or {}
-    rakennus = data.get('rakennus', {})
-
-    nimi           = (rakennus.get('nimi')           or '').strip()
-    osoite         = (rakennus.get('osoite')         or '').strip()
-    rakennustunnus = (rakennus.get('rakennustunnus') or '').strip()
-    hakusana_in    = (rakennus.get('hakusana')       or '').strip()
-
-    # (Tallennettu tarkistus poistettu — haku tehdään aina uudelleen)
-
-    # Rakenna hakusana omistajahakuun
-    if hakusana_in:
-        hakusana = hakusana_in
-    elif nimi:
-        hakusana = f'{nimi} omistaja'
-    else:
-        hakusana = f'{osoite} omistaja'.strip()
-
-    tulokset   = []
-    virhe_info = None
-    seen       = set()
-
-    def lisaa(ehdokas):
-        s = re.sub(r'\s+', ' ', ehdokas).strip().rstrip('.,;:–—- ')
-        k = s.upper()
-        if len(s) >= 5 and k not in seen:
-            seen.add(k)
-            tulokset.append({'nimi': s})
-
-    try:
-        # DuckDuckGo Lite – POST-pyyntö, sallii skräpäämisen paremmin kuin GET
-        url       = 'https://lite.duckduckgo.com/lite/'
-        post_data = urllib.parse.urlencode({'q': hakusana, 'kl': 'fi-fi'}).encode('utf-8')
-        req = urllib.request.Request(url, data=post_data, headers={
-            'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Content-Type':  'application/x-www-form-urlencoded',
-            'Accept':        'text/html,application/xhtml+xml',
-            'Accept-Language': 'fi-FI,fi;q=0.9',
-            'Referer':       'https://lite.duckduckgo.com/',
-            'Origin':        'https://lite.duckduckgo.com',
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raaka = resp.read().decode('utf-8', errors='replace')
-
-        # Poimi tulostekstit
-        teksti = re.sub(r'<[^>]+>', ' ', raaka)
-        teksti = html_lib.unescape(teksti)
-        teksti = re.sub(r'\s+', ' ', teksti)
-
-        # 1. Oyj-nimet (institutionaaliset kiinteistösijoittajat)
-        for m in re.finditer(r'([A-ZÄÖÅ][A-ZÄÖÅa-zäöå\s\-\.]{2,35}\s+Oyj)', teksti, re.UNICODE):
-            lisaa(m.group(1))
-            if len(tulokset) >= 3: break
-
-        # 2. Oy-nimet
-        if len(tulokset) < 3:
-            for m in re.finditer(r'([A-ZÄÖÅ][A-ZÄÖÅa-zäöå\s\-\.]{2,35}\s+Oy\b)', teksti, re.UNICODE):
-                lisaa(m.group(1))
-                if len(tulokset) >= 3: break
-
-        # 3. AS OY / KOY -nimet varmuuden vuoksi
-        if len(tulokset) < 3:
-            for m in re.finditer(
-                r'((?:asunto\s+oy|as\.?\s*oy|kiinteist[öo](?:yhti[öo])?\s+oy|koy)'
-                r'(?:\s+\S+){1,5})',
-                teksti, re.IGNORECASE | re.UNICODE
-            ):
-                lisaa(m.group(1))
-                if len(tulokset) >= 3: break
-
-    except Exception as e:
-        virhe_info = str(e)
-
-    return jsonify({
-        'success':  True,
-        'tulokset': tulokset,
-        'hakusana': hakusana,
-        'virhe':    virhe_info,   # frontend voi näyttää tämän debug-tietona
-    })
-
 
 @app.route('/api/test-avain', methods=['GET'])
 def test_avain():
@@ -847,40 +764,19 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <div id="ai-result" class="hidden mb-3"></div>
 
-        <!-- Hakukenttä — aina näkyvissä -->
-        <div class="space-y-2">
-          <div class="flex gap-2">
-            <input id="google-hakusana" type="text" placeholder="esim. Kojamo Oyj, SATO Oyj..."
-              class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-violet-400 focus:outline-none bg-white">
-            <button id="omistaja-btn" onclick="haeOmistaja()"
-              class="text-sm bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 transition-colors whitespace-nowrap">
-              Hae
-            </button>
-          </div>
-          <!-- Pikavalinnat hakusanalle -->
-          <div id="hakusana-pikat" class="flex flex-wrap gap-1.5"></div>
-
-          <!-- Manuaalinen syöttö aina näkyvissä -->
-          <div class="flex gap-2 items-center">
-            <input id="omistaja-manuaali" type="text" placeholder="tai kirjoita omistaja käsin..."
-              class="flex-1 text-sm border border-dashed border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-violet-400 focus:outline-none bg-white/80">
-            <button onclick="tallennaManuaaliOmistaja()"
-              class="text-xs bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 whitespace-nowrap">
-              Tallenna
-            </button>
-          </div>
+        <!-- Manuaalinen syöttö -->
+        <div class="flex gap-2 items-center mt-1">
+          <input id="omistaja-manuaali" type="text" placeholder="Kirjoita omistaja käsin..."
+            class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-violet-400 focus:outline-none bg-white">
+          <button onclick="tallennaManuaaliOmistaja()"
+            class="text-xs bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 whitespace-nowrap">
+            Tallenna
+          </button>
         </div>
 
-        <div id="omistaja-loading" class="hidden flex items-center gap-3 py-3">
-          <div class="loader"></div>
-          <span class="text-sm text-slate-500">Haetaan...</span>
-        </div>
-
-        <!-- Hakutulokset -->
+        <!-- Tallennusvahvistus -->
         <div id="prh-result" class="hidden mt-3">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Ehdokkaat</div>
           <div id="prh-lista" class="space-y-1.5"></div>
-          <button onclick="resetOmistajahaku()" class="text-xs text-slate-400 hover:text-slate-600 mt-2">← Uusi haku</button>
         </div>
 
         <div id="omistaja-error" class="hidden text-xs text-amber-700 bg-amber-50 rounded-lg p-2 mt-2"></div>
@@ -1220,7 +1116,6 @@ function openModal(row, tr) {
   // Reset omistajapaneeli
   document.getElementById('prh-result').classList.add('hidden');
   document.getElementById('omistaja-error').classList.add('hidden');
-  document.getElementById('omistaja-loading').classList.add('hidden');
   document.getElementById('ai-loading').classList.add('hidden');
   document.getElementById('ai-result').classList.add('hidden');
   document.getElementById('ai-result').innerHTML = '';
@@ -1264,8 +1159,6 @@ function openModal(row, tr) {
   const yhtioNimi = onYhtio
     ? nimi.replace(/^[^,]+,\s*/i, m => /as\.?\s*oy|asunto\s*oy|kiinteist/i.test(m) ? m : '').trim()
     : nimi;
-  // Hakusana = yhtiön nimi + "omistaja"
-  document.getElementById('google-hakusana').value = yhtioNimi ? `${yhtioNimi} omistaja` : `${osoite} omistaja`;
   // Näytä tallennettu omistaja tai piilota
   const omistajaNykyinen = document.getElementById('omistaja-nykyinen');
   const omistajaNykyinenNimi = document.getElementById('omistaja-nykyinen-nimi');
@@ -1280,39 +1173,7 @@ function openModal(row, tr) {
   // Täytä manuaalikenttä tallennetulla omistajalla jos on
   document.getElementById('omistaja-manuaali').value = savedOmistaja;
 
-  // Rakenna hakusana-pikavalinnat
-  const pikat = document.getElementById('hakusana-pikat');
-  const rNimi   = row.nimi    || '';
-  const rOsoite = row.osoite  || '';
-  const rTyyppi = row.alakaytto || row.kayttotarkoitus || '';
-  const vaihtoehdot = [];
-  if (rNimi)                           vaihtoehdot.push(`${rNimi} omistaja`);
-  if (rNimi && rOsoite)                vaihtoehdot.push(`${rNimi} ${rOsoite} omistaja`);
-  if (rNimi && rOsoite && rTyyppi)     vaihtoehdot.push(`${rNimi} ${rOsoite} ${rTyyppi} omistaja`);
-  else if (rOsoite && rTyyppi)         vaihtoehdot.push(`${rOsoite} ${rTyyppi} omistaja`);
-
-  pikat.innerHTML = vaihtoehdot.map((v, i) => {
-    const esc = v.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-    const active = i === 0 ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:border-violet-400 hover:text-violet-700';
-    return `<button onclick="setHakusana('${esc}')"
-      class="text-xs px-2.5 py-1 rounded-full transition-colors ${active} truncate max-w-[280px]"
-      title="${v}">${v}</button>`;
-  }).join('');
-
   document.getElementById('modal').classList.add('open');
-}
-
-function setHakusana(teksti) {
-  document.getElementById('google-hakusana').value = teksti;
-  // Korosta valittu nappi
-  document.querySelectorAll('#hakusana-pikat button').forEach(btn => {
-    const aktiivinen = btn.getAttribute('title') === teksti || btn.textContent.trim() === teksti;
-    if (aktiivinen) {
-      btn.className = btn.className.replace(/bg-white text-slate-600 border border-slate-200 hover:border-violet-400 hover:text-violet-700/, 'bg-violet-600 text-white');
-    } else {
-      btn.className = btn.className.replace(/bg-violet-600 text-white/, 'bg-white text-slate-600 border border-slate-200 hover:border-violet-400 hover:text-violet-700');
-    }
-  });
 }
 
 function closeModal() {
@@ -1584,78 +1445,6 @@ async function haeOmistajaAI() {
   }
 }
 
-function resetOmistajahaku() {
-  document.getElementById('prh-result').classList.add('hidden');
-  document.getElementById('omistaja-error').classList.add('hidden');
-}
-
-// ── OMISTAJAHAKU (DuckDuckGo) ──
-async function haeOmistaja() {
-  if (!currentRow) return;
-
-  const hakusana = document.getElementById('google-hakusana').value.trim();
-  if (!hakusana) return;
-
-  document.getElementById('prh-result').classList.add('hidden');
-  document.getElementById('omistaja-error').classList.add('hidden');
-  document.getElementById('omistaja-loading').classList.remove('hidden');
-  document.getElementById('omistaja-btn').disabled = true;
-
-  try {
-    const res = await fetch('/api/google-haku', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rakennus: {...currentRow, hakusana}}),
-    });
-    const data = await res.json();
-
-    document.getElementById('omistaja-loading').classList.add('hidden');
-    document.getElementById('omistaja-btn').disabled = false;
-
-    if (data.tallennettu) {
-      document.getElementById('prh-lista').innerHTML = `
-        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-          <div class="font-semibold text-emerald-800">${data.omistaja || data.yhtio_nimi}</div>
-          <div class="text-xs text-emerald-600 mt-0.5">Tallennettu aiemmin</div>
-        </div>`;
-      document.getElementById('prh-result').classList.remove('hidden');
-
-    } else if (data.tulokset && data.tulokset.length > 0) {
-      const osoite = currentRow.osoite || '';
-      const pnro   = currentRow.postinumero ? ' ' + currentRow.postinumero : '';
-      document.getElementById('prh-lista').innerHTML = data.tulokset.map(y => {
-        const esc = y.nimi.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
-        return `
-          <div class="bg-white rounded-lg p-3 border border-violet-100 flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <div class="font-medium text-slate-800 text-sm">${y.nimi}</div>
-              ${osoite ? `<div class="text-xs text-slate-400 mt-0.5 truncate">${osoite}${pnro}</div>` : ''}
-            </div>
-            <button onclick="tallennaOmistaja('${esc}')"
-              class="flex-shrink-0 text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 font-medium">
-              Valitse
-            </button>
-          </div>`;
-      }).join('');
-      document.getElementById('prh-result').classList.remove('hidden');
-      if (data.virhe)
-        document.getElementById('omistaja-error').textContent = `ℹ️ Haku onnistui osittain (${data.virhe})`;
-
-    } else {
-      // Ei tuloksia — näytä info, manuaalikenttä on jo näkyvissä
-      const virheTeksti = data.virhe
-        ? `Haku epäonnistui (${data.virhe}). Kirjoita omistaja alle.`
-        : `Ei löydetty hakusanalla "${hakusana}". Kirjoita omistaja alle.`;
-      document.getElementById('omistaja-error').textContent = '⚠️ ' + virheTeksti;
-      document.getElementById('omistaja-error').classList.remove('hidden');
-    }
-  } catch(err) {
-    document.getElementById('omistaja-loading').classList.add('hidden');
-    document.getElementById('omistaja-btn').disabled = false;
-    document.getElementById('omistaja-error').textContent = '⚠️ Verkkovirhe: ' + err.message;
-    document.getElementById('omistaja-error').classList.remove('hidden');
-  }
-}
 
 init();
 </script>
