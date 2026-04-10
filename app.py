@@ -1379,7 +1379,7 @@ function renderTable(rows) {
     if (kontaktoitu)          chips.push(`<span class="kontaktoitu-chip text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">✓ Kontaktoitu</span>`);
 
     const card = document.createElement('div');
-    card.className = `bg-white rounded-xl shadow-sm border-l-4 border-eluokka-${el} flex items-stretch cursor-pointer hover:shadow-md transition-all group`;
+    card.className = `${kontaktoitu ? 'bg-emerald-50' : 'bg-white'} rounded-xl shadow-sm border-l-4 border-eluokka-${el} flex items-stretch cursor-pointer hover:shadow-md transition-all group`;
     card.dataset.tunnus = row.rakennustunnus || '';
     card.innerHTML = `
       <div class="bg-eluokka-${el} w-12 flex-shrink-0 rounded-l-xl flex items-center justify-center">
@@ -1572,6 +1572,9 @@ async function toggleKontaktoitu() {
       } else if (!data.kontaktoitu_at && existingChip) {
         existingChip.remove();
       }
+      // Päivitä taustaväri
+      card.classList.toggle('bg-emerald-50', !!data.kontaktoitu_at);
+      card.classList.toggle('bg-white', !data.kontaktoitu_at);
     }
   }
 }

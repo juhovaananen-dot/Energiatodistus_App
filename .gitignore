@@ -1,0 +1,35 @@
+# Ympäristömuuttujat ja API-avaimet
+.env
+.env.local
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Tietokanta
+*.db
+*.sqlite
+*.sqlite3
+
+# Data (isot tiedostot)
+ethaku.csv
+ethaku.csv.zip
+BAF_*.dat
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
