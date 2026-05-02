@@ -360,178 +360,13 @@ def get_energiatodistukset():
 
 
 
-@app.route('/api/test-avain', methods=['GET'])
-def test_avain():
-    """Debug: tarkistaa onko API-avain ladattu oikein"""
-    # Lue .env-tiedosto suoraan tässä kutsussa
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-    tiedosto_avain = ''
-    tiedosto_ok = os.path.exists(env_path)
-    if tiedosto_ok:
-        with open(env_path, encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith('ANTHROPIC_API_KEY='):
-                    tiedosto_avain = line.split('=', 1)[1].strip()
-                    break
-
-    key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-    return jsonify({
-        'ymparisto_avain': {
-            'pituus': len(key),
-            'alku': key[:20] + '...' if key else '',
-            'muoto_ok': key.startswith('sk-ant-')
-        },
-        'tiedosto_avain': {
-            'pituus': len(tiedosto_avain),
-            'alku': tiedosto_avain[:20] + '...' if tiedosto_avain else '',
-            'muoto_ok': tiedosto_avain.startswith('sk-ant-'),
-            'tiedosto_loytyy': tiedosto_ok
-        },
-        'ohje': 'Käynnistä python app.py uudelleen jos ymparisto_avain != tiedosto_avain'
-    })
-
-
 @app.route('/api/omistaja-ai', methods=['POST'])
 def omistaja_ai():
-    """Hakee rakennuksen omistajan Claude AI:n avulla strukturoituna JSON-vastauksena."""
-    data     = request.json or {}
-    rakennus = data.get('rakennus', {})
-
-    nimi           = (rakennus.get('nimi')           or '').strip()
-    osoite         = (rakennus.get('osoite')         or '').strip()
-    postinumero    = str(rakennus.get('postinumero') or '').strip()
-    alakaytto      = (rakennus.get('alakaytto') or rakennus.get('kayttotarkoitus') or '').strip()
-    valmistumisvuosi = rakennus.get('valmistumisvuosi') or ''
-    nettoala       = rakennus.get('nettoala') or ''
-
-    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-    if not api_key:
-        return jsonify({
-            'success': False,
-            'error': (
-                'ANTHROPIC_API_KEY puuttuu.\n\n'
-                'Vaihtoehto 1 – .env-tiedosto (suositeltu):\n'
-                '  1. Kopioi .env.example → .env\n'
-                '  2. Lisää avain: https://console.anthropic.com/settings/keys\n'
-                '  3. Käynnistä python app.py uudelleen\n\n'
-                'Vaihtoehto 2 – komentorivi:\n'
-                '  set ANTHROPIC_API_KEY=sk-ant-api03-... && python app.py'
-            )
-        })
-
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
-        osoite_full = f'{osoite}, {postinumero}' if postinumero else osoite
-        ala_str     = f'{int(nettoala)} m²' if nettoala else 'ei tiedossa'
-
-        prompt = f"""You are an expert system for identifying ownership and key contacts for Finnish commercial real estate.
-
-INPUT:
-- Building name: {nimi or 'unknown'}
-- Address: {osoite_full}
-- Building type: {alakaytto or 'unknown'}
-- Built: {valmistumisvuosi or 'unknown'}
-- Floor area: {ala_str}
-
-GOAL: Determine:
-1. Property identity
-2. Ownership structure
-3. Best matching property contact (property manager / leasing contact)
-
-STEP 0 — KNOWN PROPERTY RECOGNITION (CRITICAL)
-- Check if the property is a well-known asset
-- If matched, use known owner as primary signal
-
-STEP 1 — IDENTIFY PROPERTY
-- Resolve address → property/building name
-
-STEP 2 — FIND OPERATORS
-- Identify: asset manager, leasing agent, property manager
-- These are the PRIMARY sources for contact persons
-
-STEP 3 — CONTACT DISCOVERY (HIGH PRIORITY)
-Find the best available contact person related to the property.
-Search sources in this order:
-1. Leasing listings (toimitilat.fi, oikotie, company sites)
-2. Asset manager website (e.g. JLL, Newsec, Juhola)
-3. Property manager listings
-4. Company portfolio pages
-Select the BEST MATCH based on:
-- Direct mention of the property (highest priority)
-- Same building or exact address
-- Same owner portfolio
-Return: name, role, company, email (if available), phone (if available)
-If multiple contacts exist, choose the most relevant (closest to leasing or property responsibility)
-
-STEP 4 — OWNER IDENTIFICATION
-Priority: 1. Known asset-owner match  2. Direct ownership info  3. Inference via operator
-
-STEP 5 — CONFIDENCE
-- HIGH: direct + named property + contact match
-- MEDIUM: indirect but consistent signals
-- LOW: weak signals
-
-RULES:
-- Prefer a real usable contact over perfect ownership certainty
-- DO NOT hallucinate emails or phone numbers — leave empty if not known
-- If exact person not found, return closest valid contact
-- Reasoning must be in Finnish
-
-Return ONLY valid JSON, no markdown:
-{{
-  "address": "{osoite_full}",
-  "property_name": "",
-  "recognized_asset": false,
-  "owner": {{
-    "name": "",
-    "confidence": "HIGH | MEDIUM | LOW"
-  }},
-  "asset_manager": "",
-  "contact": {{
-    "name": "",
-    "role": "",
-    "company": "",
-    "email": "",
-    "phone": "",
-    "match_quality": "DIRECT | CLOSE | PORTFOLIO"
-  }},
-  "evidence": [],
-  "reasoning": ""
-}}"""
-
-        message = client.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=1500,
-            messages=[{'role': 'user', 'content': prompt}]
-        )
-
-        raw = message.content[0].text.strip()
-        # Poista mahdolliset markdown-koodilohkot
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
-        raw = re.sub(r'\s*```\s*$', '', raw, flags=re.MULTILINE)
-
-        result = json.loads(raw)
-        return jsonify({'success': True, 'result': result})
-
-    except json.JSONDecodeError:
-        return jsonify({'success': False, 'error': 'AI:n vastaus ei ollut kelvollista JSON:ia.', 'raw': raw})
-    except Exception as e:
-        err = str(e)
-        if '401' in err or 'invalid x-api-key' in err or 'authentication_error' in err:
-            return jsonify({
-                'success': False,
-                'error': (
-                    'API-avain on virheellinen tai vanhentunut (401).\n\n'
-                    'Hae uusi avain: https://console.anthropic.com/settings/keys\n'
-                    'Lisää se .env-tiedostoon tai aseta ennen käynnistystä:\n'
-                    '  set ANTHROPIC_API_KEY=sk-ant-api03-...'
-                )
-            })
-        return jsonify({'success': False, 'error': err})
-
+    """AI-toiminnot on poistettu käytöstä."""
+    return jsonify({
+        'success': False,
+        'error': 'AI-toiminnot on poistettu käytöstä.'
+    })
 
 @app.route('/api/hyvaksy-yhtio', methods=['POST'])
 def hyvaksy_yhtio():
@@ -631,82 +466,11 @@ def tallenna_muistiinpano():
 
 @app.route('/api/massahaku', methods=['POST'])
 def massahaku():
-    """Ajaa AI-omistajahaut useille rakennuksille kerralla (max 20)."""
-    data = request.json or {}
-    rakennukset = data.get('rakennukset', [])[:20]
-    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-    if not api_key:
-        return jsonify({'success': False, 'error': 'ANTHROPIC_API_KEY puuttuu'})
-    if not rakennukset:
-        return jsonify({'success': False, 'error': 'Ei rakennuksia'})
-
-    import anthropic
-    client = anthropic.Anthropic(api_key=api_key)
-    tulokset = []
-
-    for rakennus in rakennukset:
-        nimi      = (rakennus.get('nimi') or '').strip()
-        osoite    = (rakennus.get('osoite') or '').strip()
-        postinumero = str(rakennus.get('postinumero') or '').strip()
-        alakaytto = (rakennus.get('alakaytto') or '').strip()
-        valmistumisvuosi = rakennus.get('valmistumisvuosi') or ''
-        nettoala  = rakennus.get('nettoala') or ''
-        rakennustunnus = (rakennus.get('rakennustunnus') or '').strip()
-
-        # Ohita jos omistaja jo tallennettu
-        tallennetut = hae_tallennetut()
-        if rakennustunnus and tallennetut.get(rakennustunnus, {}).get('omistaja'):
-            tulokset.append({'rakennustunnus': rakennustunnus, 'skip': True,
-                             'omistaja': tallennetut[rakennustunnus]['omistaja']})
-            continue
-
-        osoite_full = f'{osoite}, {postinumero}' if postinumero else osoite
-        ala_str = f'{int(nettoala)} m²' if nettoala else 'ei tiedossa'
-
-        prompt = f"""Selvitä suomalaisen kiinteistön omistaja. Palauta VAIN JSON.
-Rakennus: {nimi or 'ei tiedossa'}, {osoite_full}, {alakaytto or ''}, {valmistumisvuosi or ''}, {ala_str}
-MUISTA: omistaja ≠ vuokralainen. Anna LOW confidence jos epävarma.
-{{"owner":{{"name":"","confidence":"HIGH|MEDIUM|LOW"}},"reasoning":""}}"""
-
-        try:
-            msg = client.messages.create(
-                model='claude-haiku-4-5-20251001', max_tokens=256,
-                messages=[{'role': 'user', 'content': prompt}]
-            )
-            raw = msg.content[0].text.strip()
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
-            raw = re.sub(r'\s*```\s*$', '', raw, flags=re.MULTILINE)
-            result = json.loads(raw)
-            owner_name = result.get('owner', {}).get('name', '')
-            confidence = result.get('owner', {}).get('confidence', 'LOW')
-
-            # Tallenna automaattisesti jos HIGH tai MEDIUM
-            if owner_name and confidence in ('HIGH', 'MEDIUM') and rakennustunnus:
-                with db_lock:
-                    with sqlite3.connect(DB_PATH) as con:
-                        existing = con.execute(
-                            'SELECT yhtio_nimi FROM yhtiot WHERE rakennustunnus=?',
-                            (rakennustunnus,)).fetchone()
-                        if existing:
-                            con.execute('UPDATE yhtiot SET omistaja=? WHERE rakennustunnus=?',
-                                        (owner_name, rakennustunnus))
-                        else:
-                            con.execute('''INSERT INTO yhtiot (rakennustunnus, osoite, yhtio_nimi, omistaja)
-                                           VALUES (?,?,?,?)''',
-                                        (rakennustunnus, osoite, nimi, owner_name))
-                        con.commit()
-
-            tulokset.append({
-                'rakennustunnus': rakennustunnus, 'nimi': nimi, 'osoite': osoite,
-                'omistaja': owner_name, 'confidence': confidence,
-                'reasoning': result.get('reasoning', ''), 'tallennettu': confidence in ('HIGH', 'MEDIUM')
-            })
-        except Exception as e:
-            tulokset.append({'rakennustunnus': rakennustunnus, 'nimi': nimi,
-                             'osoite': osoite, 'virhe': str(e)})
-
-    return jsonify({'success': True, 'tulokset': tulokset})
-
+    """AI-toiminnot on poistettu käytöstä."""
+    return jsonify({
+        'success': False,
+        'error': 'AI-toiminnot on poistettu käytöstä.'
+    })
 
 @app.route('/api/vie-excel')
 def vie_excel():
@@ -791,7 +555,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Energiatodistusrekisteri</title>
+<title>Energiatodistusrekisteri — DEMO</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; }
@@ -822,6 +586,14 @@ HTML = r"""<!DOCTYPE html>
 </head>
 <body class="min-h-screen">
 
+<!-- ── DEMO-PALKKI ── -->
+<div class="bg-amber-100 border-b border-amber-300 text-amber-900 text-xs px-6 py-2 flex items-center gap-2">
+  <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/>
+  </svg>
+  <span><b>Demo-versio</b> — kaikki ominaisuudet eivät ole käytössä. AI-toiminnot näyttävät vain kuvauksen toiminnasta.</span>
+</div>
+
 <!-- ── HEADER ── -->
 <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 sticky top-0 z-20 shadow-sm">
   <div class="flex items-center gap-2">
@@ -829,6 +601,7 @@ HTML = r"""<!DOCTYPE html>
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
     </svg>
     <span class="font-bold text-xl text-slate-800">Energiatodistusrekisteri</span>
+    <span class="ml-1 text-xs font-bold bg-amber-500 text-white px-2 py-0.5 rounded-md uppercase tracking-wider">Demo</span>
   </div>
   <div class="ml-auto text-sm text-slate-500" id="total-label">Ladataan...</div>
 </header>
@@ -944,7 +717,6 @@ HTML = r"""<!DOCTYPE html>
         </svg>
         Vie Excel
       </a>
-      <div id="massahaku-status" class="hidden text-xs text-violet-600 bg-violet-50 px-2 py-1 rounded-lg"></div>
       <div class="ml-auto flex items-center gap-3">
         <select id="sort-select" onchange="handleSortSelect()" class="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600">
           <option value="eluku|desc">E-luku ↓ ensin</option>
@@ -1065,12 +837,6 @@ HTML = r"""<!DOCTYPE html>
             </button>
           </div>
         </div>
-        <div id="ai-loading" class="hidden flex items-center gap-3 py-2 mb-3">
-          <div class="loader"></div>
-          <span class="text-sm text-slate-500">Claude analysoi omistajuutta...</span>
-        </div>
-        <div id="ai-result" class="hidden mb-3"></div>
-
         <!-- Manuaalinen syöttö -->
         <div class="flex gap-2 items-center mt-1">
           <input id="omistaja-manuaali" type="text" placeholder="Kirjoita omistaja käsin..."
@@ -1455,10 +1221,8 @@ function openModal(row, tr) {
   // Reset omistajapaneeli
   document.getElementById('prh-result').classList.add('hidden');
   document.getElementById('omistaja-error').classList.add('hidden');
-  document.getElementById('ai-loading').classList.add('hidden');
-  document.getElementById('ai-result').classList.add('hidden');
-  document.getElementById('ai-result').innerHTML = '';
-  document.getElementById('ai-haku-btn').disabled = false;
+  const aiBtn = document.getElementById('ai-haku-btn');
+  if (aiBtn) aiBtn.disabled = false;
 
   // ── Nimi-fi: näytetään suoraan jos sisältää AS OY / KOY ──
   const nimiBlock = document.getElementById('nimi-ehdotus-block');
@@ -1610,46 +1374,10 @@ async function tallennaMuistiinpano() {
 }
 
 async function kaynnistaMassahaku() {
-  const statusEl = document.getElementById('massahaku-status');
-  statusEl.textContent = 'Haetaan näkyvät rakennukset...';
-  statusEl.classList.remove('hidden');
-
-  // Kerää nykyiset kortit
-  const cards = document.querySelectorAll('#table-body [data-tunnus]');
-  const rakennukset = [];
-  cards.forEach(card => {
-    if (card._rowData) rakennukset.push(card._rowData);
-  });
-
-  if (!rakennukset.length) {
-    statusEl.textContent = 'Ei rakennuksia — hae ensin tuloksia';
-    return;
-  }
-
-  const erä = rakennukset.slice(0, 20);
-  statusEl.textContent = `AI hakee omistajia ${erä.length} rakennukselle...`;
-
-  const res = await fetch('/api/massahaku', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rakennukset: erä}),
-  });
-  const data = await res.json();
-  if (!data.success) { statusEl.textContent = '⚠️ ' + data.error; return; }
-
-  let tallennettu = 0, ohitettu = 0;
-  data.tulokset.forEach(t => {
-    if (t.skip) { ohitettu++; return; }
-    if (t.tallennettu && t.omistaja) {
-      tallennettu++;
-      if (!state.tallennetut[t.rakennustunnus]) state.tallennetut[t.rakennustunnus] = {rakennustunnus: t.rakennustunnus};
-      state.tallennetut[t.rakennustunnus].omistaja = t.omistaja;
-      paivitaOmistajaChip(t.rakennustunnus, t.omistaja);
-    }
-  });
-
-  statusEl.textContent = `✓ Valmis — ${tallennettu} omistajaa tallennettu, ${ohitettu} ohitettu (jo tallennettu)`;
-  setTimeout(() => statusEl.classList.add('hidden'), 5000);
+  naytaAIDemo(
+    'Massahaku',
+    'Hakee tekoälyn avulla omistajatiedot kaikille näkyville rakennuksille kerralla (max 20). Korkean varmuuden tulokset tallentuvat automaattisesti.'
+  );
 }
 
 function closeModal() {
@@ -1836,98 +1564,44 @@ async function hyvaksyYhtio(yhtioNimi, ytunnus) {
   }
 }
 
-// ── AI-OMISTAJAHAKU ──
+// ── AI-DEMO: yhteinen info-ikkuna kaikille AI-toiminnoille ──
+function naytaAIDemo(otsikko, kuvaus) {
+  // Poista mahdollinen aiempi
+  const vanha = document.getElementById('ai-demo-modal');
+  if (vanha) vanha.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ai-demo-modal';
+  overlay.className = 'fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 relative">
+      <button onclick="document.getElementById('ai-demo-modal').remove()"
+        class="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.51 3.51 0 0114.5 20.5H10a3.51 3.51 0 01-2.121-.754l-.347-.346z"/>
+        </svg>
+        <h3 class="font-semibold text-slate-800 text-lg">${otsikko}</h3>
+        <span class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full ml-1">demo</span>
+      </div>
+      <p class="text-sm text-slate-600 leading-relaxed">${kuvaus}</p>
+      <p class="text-xs text-slate-400 mt-3">AI-toiminnot on poistettu käytöstä demo-versiossa.</p>
+      <div class="mt-5 text-right">
+        <button onclick="document.getElementById('ai-demo-modal').remove()"
+          class="text-sm font-medium px-4 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-700">
+          Sulje
+        </button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
 async function haeOmistajaAI() {
-  if (!currentRow) return;
-
-  const btn = document.getElementById('ai-haku-btn');
-  const loading = document.getElementById('ai-loading');
-  const resultEl = document.getElementById('ai-result');
-
-  btn.disabled = true;
-  loading.classList.remove('hidden');
-  resultEl.classList.add('hidden');
-  resultEl.innerHTML = '';
-
-  try {
-    const res = await fetch('/api/omistaja-ai', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rakennus: currentRow}),
-    });
-    const data = await res.json();
-    loading.classList.add('hidden');
-    btn.disabled = false;
-
-    if (!data.success) {
-      resultEl.innerHTML = `<div class="text-xs text-red-600 bg-red-50 rounded-lg p-3 whitespace-pre-wrap">${data.error}</div>`;
-      resultEl.classList.remove('hidden');
-      return;
-    }
-
-    const r = data.result;
-    const owner   = r.owner   || {};
-    const contact = r.contact || {};
-    const confColor = owner.confidence === 'HIGH' ? 'emerald' : owner.confidence === 'MEDIUM' ? 'amber' : 'orange';
-    const confLabel = owner.confidence === 'HIGH' ? 'Varma' : owner.confidence === 'MEDIUM' ? 'Todennäköinen' : 'Epävarma';
-    const mqColor = contact.match_quality === 'DIRECT' ? 'emerald' : contact.match_quality === 'CLOSE' ? 'amber' : 'slate';
-    const mqLabel = contact.match_quality === 'DIRECT' ? 'Suora' : contact.match_quality === 'CLOSE' ? 'Läheinen' : 'Portfolio';
-
-    const evidenceHtml = (r.evidence || []).map(e => `
-      <li class="flex gap-1.5">
-        <span class="text-xs mt-0.5 text-slate-400">·</span>
-        <span class="text-xs text-slate-600">${typeof e === 'string' ? e : e.description || ''}</span>
-      </li>`).join('');
-
-    const contactHtml = contact.name ? `
-      <div class="border border-slate-100 rounded-lg p-3 space-y-1 bg-slate-50">
-        <div class="flex items-center justify-between gap-2">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Yhteyshenkilö</div>
-          ${contact.match_quality ? `<span class="text-xs bg-${mqColor}-100 text-${mqColor}-700 px-2 py-0.5 rounded-full">${mqLabel}</span>` : ''}
-        </div>
-        <div class="font-semibold text-slate-800 text-sm">${contact.name}</div>
-        ${contact.role    ? `<div class="text-xs text-slate-500">${contact.role}${contact.company ? ' · ' + contact.company : ''}</div>` : ''}
-        ${contact.email   ? `<div class="text-xs text-blue-600 mt-1"><a href="mailto:${contact.email}">${contact.email}</a></div>` : ''}
-        ${contact.phone   ? `<div class="text-xs text-slate-600">${contact.phone}</div>` : ''}
-      </div>` : '';
-
-    resultEl.innerHTML = `
-      <div class="bg-white border border-violet-100 rounded-xl p-4 space-y-3">
-
-        <!-- Omistaja -->
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Omistaja</div>
-            <div class="font-bold text-slate-800 text-base">${owner.name || '—'}</div>
-            ${r.asset_manager ? `<div class="text-xs text-slate-500 mt-0.5">Asset manager: ${r.asset_manager}</div>` : ''}
-            ${r.recognized_asset ? `<div class="text-xs text-violet-600 mt-0.5">✓ Tunnistettu kiinteistö</div>` : ''}
-          </div>
-          <div class="flex flex-col items-end gap-2 flex-shrink-0">
-            <span class="text-xs font-semibold bg-${confColor}-100 text-${confColor}-700 px-2 py-0.5 rounded-full">${confLabel}</span>
-            ${owner.name ? `<button onclick="tallennaOmistaja('${owner.name.replace(/'/g,"\\'")}')"
-              class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 font-medium whitespace-nowrap">
-              Tallenna omistaja
-            </button>` : ''}
-          </div>
-        </div>
-
-        <!-- Yhteyshenkilö -->
-        ${contactHtml}
-
-        <!-- Evidence -->
-        ${evidenceHtml ? `<ul class="space-y-1 border-t border-slate-100 pt-2">${evidenceHtml}</ul>` : ''}
-
-        <!-- Perustelu -->
-        ${r.reasoning ? `<div class="text-xs text-slate-500 italic border-t border-slate-100 pt-2">${r.reasoning}</div>` : ''}
-      </div>`;
-    resultEl.classList.remove('hidden');
-
-  } catch(err) {
-    loading.classList.add('hidden');
-    btn.disabled = false;
-    resultEl.innerHTML = `<div class="text-xs text-red-600 bg-red-50 rounded-lg p-3">Verkkovirhe: ${err.message}</div>`;
-    resultEl.classList.remove('hidden');
-  }
+  naytaAIDemo(
+    'AI-haku',
+    'Hakee tekoälyn avulla rakennuksen omistajatiedon ja parhaan kontaktihenkilön (esim. isännöitsijä tai vuokrauspäällikkö) osoitteen, käyttötarkoituksen ja muiden tietojen perusteella.'
+  );
 }
 
 
